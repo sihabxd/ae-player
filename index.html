@@ -1830,26 +1830,13 @@
     <!-- Font Awesome Library -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 
-    <!-- Inject runtime env for browser (served from /env.js) -->
-    <script src="/env.js"></script>
-
     <script>
-        // Professional Airtable Configuration
-        const API_CONFIG = {
-            BASE_URL: 'http://localhost:3000/api',
-            ENDPOINTS: {
-                VIDEOS: '/videos',
-                CONFIG: '/config'
-            }
+        // Local Storage Configuration
+        const LOCAL_STORAGE_KEYS = {
+            VIDEOS: 'ae-player-videos',
+            RECENT: 'ae-player-recent',
+            SETTINGS: 'ae-player-settings'
         };
-
-        // Secure configuration management
-        // NOTE: `process.env` is not available in browsers and will throw. Use window.__ENV injection or fallbacks.
-        const BROWSER_ENV = (typeof window !== 'undefined' && window.__ENV) ? window.__ENV : {};
-        const VIDEO_SERVICE_URL = BROWSER_ENV.VIDEO_SERVICE_URL || '/api/videos';
-        const YOUTUBE_PROXY_URL = BROWSER_ENV.YOUTUBE_PROXY_URL || 'https://your-secure-proxy.com/youtube';
-        const AIRTABLE_API_URL = BROWSER_ENV.AIRTABLE_API_URL || 'https://api.airtable.com/v0';
-        const CORS_PROXY_URL = BROWSER_ENV.CORS_PROXY_URL || 'https://your-secure-proxy.com';
 
         const CONFIG = {
             API_ENDPOINTS: {
@@ -1871,15 +1858,9 @@
             SEARCH_OPERATOR: 'OR' // OR, AND
         };
 
-        // Professional Airtable Service Class with enhanced error handling
-        class AirtableService {
+        // Local Storage Service for Offline Support
+        class LocalStorageService {
             constructor() {
-                this.baseUrl = API_CONFIG.BASE_URL + API_CONFIG.ENDPOINTS.VIDEOS;
-                this.headers = {
-                    'Content-Type': 'application/json'
-                };
-                this.retryCount = 3;
-                this.retryDelay = 1000;
                 this.cache = new Map();
             }
 
@@ -1911,14 +1892,11 @@
                 return new Promise(resolve => setTimeout(resolve, ms));
             }
 
-            // Get all videos from Airtable with enhanced error handling
+            // Get all videos from local storage
             async getAllVideos() {
                 try {
-                    console.log('Fetching videos from Airtable...');
-                    const data = await this.handleRequest(this.baseUrl, {
-                        method: 'GET',
-                        headers: this.headers
-                    });
+                    const videos = localStorage.getItem(LOCAL_STORAGE_KEYS.VIDEOS);
+                    return videos ? JSON.parse(videos) : [];
 
                     if (!data.records || !Array.isArray(data.records)) {
                         throw new Error('Invalid Airtable response format');
