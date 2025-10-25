@@ -1779,7 +1779,8 @@
         <div class="main-content">
             <div class="player-section slide-in-left">
                 <div class="video-container">
-                    <iframe id="videoPlayer" src="" allow="autoplay; encrypted-media; fullscreen" allowfullscreen></iframe>
+                    <iframe id="videoPlayer" src="" allow="autoplay; encrypted-media; fullscreen"
+                        allowfullscreen></iframe>
                     <div class="fallback-message" id="fallbackMessage">
                         <h3><i class="fas fa-exclamation-triangle"></i> Preview Not Available</h3>
                         <p>This video cannot be previewed directly. Try one of these options:</p>
@@ -1996,9 +1997,36 @@
 
         // ==================== ENHANCED UNIVERSAL VIDEO URL PARSER ====================
         class UniversalVideoParser {
-            static parseURL(url) {
+            static async parseURL(url) {
                 if (!url) return null;
-                
+
+                url = url.trim();
+                if (!url.startsWith('http://') && !url.startsWith('https://')) {
+                    url = 'https://' + url;
+                }
+
+                let parsedUrl;
+                try {
+                    parsedUrl = new URL(url);
+                } catch (e) {
+                    return null; // Invalid URL
+                }
+
+                const shortenerDomains = [
+                    'bit.ly', 't.co', 'tinyurl.com', 'goo.gl', 'is.gd', 'ow.ly', 'buff.ly',
+                    'adf.ly', 'bc.vc', 'cutt.ly', 'db.tt', 'q.gs', 'po.st', 'pub.vitrue.com',
+                    'link.zip.net', 'tiny.cc', 'wp.me', 'tr.im', 'twurl.nl', 'cli.gs',
+                    ' Chilp.it', 'clop.in', 'ff.im', 'idek.net', 'kl.am', 'migre.me',
+                    'hex.io', 'hurl.me', 'krunchd.com', 'liip.to', 'lnkd.in', 'memurl.com'
+                ];
+
+                const host = parsedUrl.host.toLowerCase().replace('www.', '');
+
+                let resolvedUrl = url;
+                if (shortenerDomains.includes(host)) {
+                    resolvedUrl = await this.resolveShortUrl(url);
+                }
+
                 // Try each platform parser in order
                 const parsers = [
                     this.parseYouTube,
@@ -2015,9 +2043,9 @@
                     this.parseGooglePhotos,
                     this.parseDirectVideo
                 ];
-                
+
                 for (const parser of parsers) {
-                    const result = parser(url);
+                    const result = parser(resolvedUrl);
                     if (result) {
                         return {
                             ...result,
@@ -2025,9 +2053,48 @@
                         };
                     }
                 }
-                
+
                 // Fallback for unknown URLs
                 return this.parseUnknown(url);
+            }
+
+            static async resolveShortUrl(url, hops = 0) {
+                if (hops > 5) return url;
+
+                try {
+                    const response = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(url)}`);
+                    if (!response.ok) return url;
+
+                    const data = await response.json();
+
+                    // Check if direct video
+                    const contentType = data.headers['content-type'] || data.headers['Content-Type'] || '';
+                    if (contentType.includes('video/')) {
+                        return url; // Use original URL for direct video, browser will handle redirect
+                    }
+
+                    const contents = data.contents;
+                    if (typeof contents !== 'string' || !contents.toLowerCase().includes('<html')) {
+                        return url; // Not HTML, possibly direct file or error
+                    }
+
+                    const parser = new DOMParser();
+                    const doc = parser.parseFromString(contents, 'text/html');
+
+                    let finalUrl = doc.querySelector('link[rel="canonical"]')?.getAttribute('href');
+                    if (!finalUrl) {
+                        finalUrl = doc.querySelector('meta[property="og:url"]')?.getAttribute('content');
+                    }
+
+                    if (finalUrl && finalUrl !== url) {
+                        return await this.resolveShortUrl(finalUrl, hops + 1);
+                    }
+
+                    return url;
+                } catch (error) {
+                    console.error('URL resolution error:', error);
+                    return url;
+                }
             }
 
             static parseYouTube(url) {
@@ -2041,7 +2108,7 @@
                     const match = url.match(pattern);
                     if (match) {
                         const videoId = match[1];
-                        
+
                         // Handle playlists
                         if (url.includes('playlist')) {
                             return {
@@ -2244,7 +2311,7 @@
             static parseTwitch(url) {
                 const videoPattern = /twitch\.tv\/videos\/(\d+)/;
                 const clipPattern = /twitch\.tv\/(?:\w+)\/clip\/([^?]+)/;
-                
+
                 const videoMatch = url.match(videoPattern);
                 if (videoMatch) {
                     return {
@@ -2259,7 +2326,7 @@
                         description: 'Twitch Video'
                     };
                 }
-                
+
                 const clipMatch = url.match(clipPattern);
                 if (clipMatch) {
                     return {
@@ -2274,7 +2341,7 @@
                         description: 'Twitch Clip'
                     };
                 }
-                
+
                 return null;
             }
 
@@ -2331,9 +2398,10 @@
             }
 
             static parseDirectVideo(url) {
-                const videoExtensions = ['.mp4', '.webm', '.ogg', '.mov', '.mkv', '.flv', '.avi'];
-                const isVideo = videoExtensions.some(ext => url.toLowerCase().includes(ext));
-                
+                const videoExtensions = ['.mp4', '.webm', '.ogg', '.mov', '.mkv', '.flv', '.avi', '.m3u8'];
+                const lowerUrl = url.toLowerCase();
+                const isVideo = videoExtensions.some(ext => lowerUrl.endsWith(ext));
+
                 if (isVideo) {
                     return {
                         videoId: btoa(url).replace(/=/g, ''),
@@ -2485,16 +2553,16 @@
             loadDirectVideo(video, url) {
                 // Replace iframe with video element for direct video files
                 const videoContainer = this.videoPlayer.parentElement;
-                
+
                 // Remove existing video elements
                 const existingVideo = videoContainer.querySelector('video');
                 if (existingVideo) {
                     existingVideo.remove();
                 }
-                
-                // Show the iframe again
+
+                // Hide the iframe
                 this.videoPlayer.style.display = 'none';
-                
+
                 // Create video element
                 const videoElement = document.createElement('video');
                 videoElement.controls = true;
@@ -2504,20 +2572,20 @@
                 videoElement.style.position = 'absolute';
                 videoElement.style.top = '0';
                 videoElement.style.left = '0';
-                
+
                 const source = document.createElement('source');
                 source.src = url;
                 source.type = this.getVideoMimeType(url);
-                
+
                 videoElement.appendChild(source);
                 videoContainer.appendChild(videoElement);
-                
+
                 // Update UI
                 this.currentVideoTitle.textContent = video.title;
                 this.currentVideoDescription.textContent = video.description;
                 this.currentPlatformBadge.className = 'platform-badge badge-other';
                 this.currentPlatformBadge.textContent = 'Direct Video';
-                
+
                 this.videoManager.showNotification('Loaded direct video file', 'success');
             }
 
@@ -2530,14 +2598,15 @@
                     'mov': 'video/quicktime',
                     'mkv': 'video/x-matroska',
                     'flv': 'video/x-flv',
-                    'avi': 'video/x-msvideo'
+                    'avi': 'video/x-msvideo',
+                    'm3u8': 'application/x-mpegURL'
                 };
                 return mimeTypes[extension] || 'video/mp4';
             }
 
             handleEmbedError(video, embedUrls) {
                 this.currentEmbedIndex++;
-                
+
                 if (this.currentEmbedIndex < embedUrls.length) {
                     // Try next embed URL
                     this.videoPlayer.src = embedUrls[this.currentEmbedIndex];
@@ -2608,12 +2677,12 @@
                 this.currentFilters = { platform: 'all' };
                 this.recentlyPlayed = [];
                 this.isLoading = false;
-                
+
                 this.services = {
                     airtable: new AirtableService('patPnJxM2TRWXuka0.087c43bbf8e133080578197ef90fbd4ab5aba7dd7b77194e54fc7a98c5707899'),
                     metadata: new VideoMetadataService()
                 };
-                
+
                 this.searchService = new SearchService(this.services.airtable);
                 this.cache = new Map();
                 this.searchTimeout = null;
@@ -2621,7 +2690,7 @@
 
             async loadVideos() {
                 this.isLoading = true;
-                
+
                 try {
                     // Try to load from cache first
                     const cached = this.loadFromStorage(CONFIG.STORAGE.ALL_VIDEOS_KEY);
@@ -2634,18 +2703,18 @@
                     const freshVideos = await this.services.airtable.getAllVideos();
                     this.allVideos = freshVideos;
                     this.saveToStorage(CONFIG.STORAGE.ALL_VIDEOS_KEY, this.allVideos);
-                    
+
                     await this.searchService.buildSearchIndex(this.allVideos);
-                    
+
                     // Restore application state
                     this.restoreApplicationState();
-                    
+
                     this.applyFiltersAndSearch();
-                    
+
                     if (freshVideos.length > 0) {
                         this.showNotification(`Synced ${freshVideos.length} videos from cloud`, 'success');
                     }
-                    
+
                     return this.allVideos;
                 } catch (error) {
                     console.error('Error loading videos:', error);
@@ -2680,7 +2749,7 @@
                 return videos.filter(video => {
                     return CONFIG.SEARCH.SEARCH_FIELDS.some(field => {
                         const fieldValue = String(video[field] || '').toLowerCase();
-                        return CONFIG.SEARCH.FUZZY_SEARCH 
+                        return CONFIG.SEARCH.FUZZY_SEARCH
                             ? this.fuzzyMatch(fieldValue, searchLower)
                             : fieldValue.includes(searchLower);
                     });
@@ -2700,7 +2769,7 @@
 
             sortVideos(videos, sortOption) {
                 const sorted = [...videos];
-                
+
                 switch (sortOption) {
                     case 'title_asc':
                         sorted.sort((a, b) => a.title.localeCompare(b.title));
@@ -2738,7 +2807,7 @@
                         });
                         break;
                 }
-                
+
                 return sorted;
             }
 
@@ -2756,43 +2825,43 @@
 
             nextVideo() {
                 if (this.filteredVideos.length === 0) return null;
-                
+
                 const currentIndex = this.filteredVideos.findIndex(v => v.id === this.currentVideoId);
                 let nextIndex = currentIndex + 1;
-                
+
                 if (nextIndex >= this.filteredVideos.length) {
                     nextIndex = 0; // Loop to beginning
                 }
-                
+
                 return this.loadVideoById(this.filteredVideos[nextIndex].id);
             }
 
             prevVideo() {
                 if (this.filteredVideos.length === 0) return null;
-                
+
                 const currentIndex = this.filteredVideos.findIndex(v => v.id === this.currentVideoId);
                 let prevIndex = currentIndex - 1;
-                
+
                 if (prevIndex < 0) {
                     prevIndex = this.filteredVideos.length - 1; // Loop to end
                 }
-                
+
                 return this.loadVideoById(this.filteredVideos[prevIndex].id);
             }
 
             addToRecentlyPlayed(videoId) {
                 const existingIndex = this.recentlyPlayed.findIndex(v => v.id === videoId);
-                
+
                 if (existingIndex !== -1) {
                     this.recentlyPlayed.splice(existingIndex, 1);
                 }
-                
+
                 this.recentlyPlayed.unshift({
                     id: videoId,
                     playedAt: new Date().toISOString(),
                     playCount: (this.getRecentlyPlayedData(videoId)?.playCount || 0) + 1
                 });
-                
+
                 // Keep only last 50 entries
                 this.recentlyPlayed = this.recentlyPlayed.slice(0, 50);
                 this.saveToStorage(CONFIG.STORAGE.RECENTLY_PLAYED_KEY, this.recentlyPlayed);
@@ -2880,7 +2949,7 @@
                     return;
                 }
 
-                videoList.innerHTML = this.filteredVideos.map((video, index) => 
+                videoList.innerHTML = this.filteredVideos.map((video, index) =>
                     this.createVideoItemHTML(video, index)
                 ).join('');
             }
@@ -2889,7 +2958,7 @@
                 const isActive = video.id === this.currentVideoId;
                 const recentlyPlayed = this.getRecentlyPlayedData(video.id);
                 const popularityScore = this.calculatePopularityScore(video);
-                
+
                 return `
                     <div class="video-item ${video.type} ${isActive ? 'active' : ''}" 
                          data-video-id="${video.id}" data-index="${index}">
@@ -2934,7 +3003,7 @@
             updateNavigationButtons() {
                 const prevBtn = document.getElementById('prevBtn');
                 const nextBtn = document.getElementById('nextBtn');
-                
+
                 if (!prevBtn || !nextBtn) return;
 
                 const hasVideos = this.filteredVideos.length > 0;
@@ -2954,15 +3023,15 @@
 
             getThumbnailUrl(video) {
                 if (video.thumbnail) return video.thumbnail;
-                
+
                 if (video.type.includes('youtube')) {
-                    return video.type === 'youtube_playlist' 
+                    return video.type === 'youtube_playlist'
                         ? 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTAwIiBoZWlnaHQ9IjcwIiB2aWV3Qm94PSIwIDAgMTAwIDcwIiBmaWxsPSJub25lIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPjxyZWN0IHdpZHRoPSIxMDAiIGhlaWdodD0iNzAiIGZpbGw9IiNmMTBhMGIiLz48dGV4dCB4PSI1MCIgeT0iMzUiIGZvbnQtZmFtaWx5PSJBcmlhbCIgZm9udC1zaXplPSIxMCIgZmlsbD0id2hpdGUiIHRleHQtYW5jaG9yPSJtaWRkbGUiPllvdVR1YmUgUGxheWxpc3Q8L3RleHQ+PC9zdmc+'
                         : `https://img.youtube.com/vi/${video.videoId}/hqdefault.jpg`;
                 } else if (video.type === 'drive') {
                     return `https://drive.google.com/thumbnail?id=${video.videoId}&sz=w400`;
                 }
-                
+
                 return 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTAwIiBoZWlnaHQ9IjcwIiB2aWV3Qm94PSIwIDAgMTAwIDcwIiBmaWxsPSJub25lIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPjxyZWN0IHdpZHRoPSIxMDAiIGhlaWdodD0iNzAiIGZpbGw9IiMzMzMiLz48cGF0aCBkPSJNMzUgMzBMNTAgNDVINjVMMzUiIHN0cm9rZT0iIzk5OSIgc3Ryb2tlLXdpZHRoPSIyIi8+PC9zdmc+';
             }
 
@@ -2986,7 +3055,7 @@
             showNotification(message, type = 'success') {
                 const notification = document.getElementById('notification');
                 const notificationText = document.getElementById('notificationText');
-                
+
                 if (!notification || !notificationText) return;
 
                 notificationText.textContent = message;
@@ -3004,7 +3073,7 @@
                 }
 
                 try {
-                    const parsed = UniversalVideoParser.parseURL(url);
+                    const parsed = await UniversalVideoParser.parseURL(url);
                     if (!parsed) {
                         throw new Error('Unsupported video URL format');
                     }
@@ -3022,18 +3091,18 @@
                     };
 
                     const createdVideo = await this.services.airtable.addVideo(videoData);
-                    
+
                     // Update local state
                     this.allVideos.push(createdVideo);
                     await this.searchService.buildSearchIndex(this.allVideos);
                     this.saveToStorage(CONFIG.STORAGE.ALL_VIDEOS_KEY, this.allVideos);
-                    
+
                     // Refresh view
                     this.applyFiltersAndSearch();
-                    
+
                     this.showNotification('Video added successfully!', 'success');
                     return createdVideo;
-                    
+
                 } catch (error) {
                     console.error('Error adding video:', error);
                     this.showNotification('Failed to add video: ' + error.message, 'error');
@@ -3118,24 +3187,34 @@
 
             async addVideo(video) {
                 try {
+                    // Convert embedUrls array → comma-separated string (Airtable-friendly)
+                    const embedUrlsString = Array.isArray(video.embedUrls)
+                        ? video.embedUrls.join(', ')
+                        : (video.embedUrls || video.url || '');
+
                     const record = {
                         fields: {
-                            videoId: video.id,
-                            title: video.title,
-                            description: video.description,
-                            type: video.type,
-                            duration: video.duration || '--:--',
-                            url: video.url,
-                            embedUrls: video.embedUrls || [video.url],
-                            thumbnail: video.thumbnail || '',
+                            videoId: String(video.id || ''),
+                            title: String(video.title || 'Untitled Video'),
+                            description: String(video.description || ''),
+                            type: String(video.type || 'other'),
+                            duration: String(video.duration || '--:--'),
+                            url: String(video.url || ''),
+                            embedUrls: embedUrlsString,  // Now a string, not array
+                            thumbnail: video.thumbnail ? [{ url: video.thumbnail }] : undefined,
                             createdAt: new Date().toISOString(),
                             status: 'active',
-                            viewCount: video.viewCount || 0,
-                            tags: video.tags || [],
+                            viewCount: 0,
+                            tags: video.tags?.join(', ') || '',
                             category: video.category || 'general',
-                            author: video.author || ''
+                            author: video.author || 'Custom User'
                         }
                     };
+
+                    // Remove undefined fields (Airtable rejects them)
+                    Object.keys(record.fields).forEach(key =>
+                        record.fields[key] === undefined && delete record.fields[key]
+                    );
 
                     const data = await this.handleRequest(this.baseUrl, {
                         method: 'POST',
@@ -3152,26 +3231,25 @@
                     return {
                         id: createdRecord.id,
                         videoId: createdRecord.fields.videoId,
-                        title: createdRecord.fields.title,
-                        description: createdRecord.fields.description,
-                        type: createdRecord.fields.type,
-                        duration: createdRecord.fields.duration,
-                        url: createdRecord.fields.url,
-                        embedUrls: createdRecord.fields.embedUrls || [createdRecord.fields.url],
-                        thumbnail: createdRecord.fields.thumbnail,
+                        title: createdRecord.fields.title || 'Untitled',
+                        description: createdRecord.fields.description || '',
+                        type: createdRecord.fields.type || 'other',
+                        duration: createdRecord.fields.duration || '--:--',
+                        url: createdRecord.fields.url || '',
+                        embedUrls: createdRecord.fields.embedUrls?.split(', ') || [],
+                        thumbnail: createdRecord.fields.thumbnail?.[0]?.url || null,
                         createdAt: createdRecord.fields.createdAt,
-                        status: createdRecord.fields.status,
+                        status: createdRecord.fields.status || 'active',
                         viewCount: createdRecord.fields.viewCount || 0,
-                        tags: createdRecord.fields.tags || [],
+                        tags: createdRecord.fields.tags?.split(', ') || [],
                         category: createdRecord.fields.category || 'general',
                         author: createdRecord.fields.author || ''
                     };
                 } catch (error) {
-                    console.error('Error adding video to Airtable:', error);
+                    console.error('Airtable add error:', error);
                     throw error;
                 }
             }
-
             clearCache() {
                 this.cache.clear();
             }
@@ -3326,11 +3404,11 @@
                     document.querySelectorAll('.platform-tab').forEach(t => t.classList.remove('active'));
                     tab.classList.add('active');
                     const platform = tab.dataset.platform;
-                    
+
                     videoManager.currentPlatform = platform;
                     videoManager.currentFilters.platform = platform;
                     filterOptions.value = platform;
-                    
+
                     videoManager.applyFiltersAndSearch();
                     videoManager.showNotification(`Showing ${platform} videos`, 'success');
                 });
@@ -3352,10 +3430,10 @@
                 videoManager.currentPlatform = 'all';
                 sortOptions.value = 'default';
                 videoManager.currentSortOption = 'default';
-                
+
                 document.querySelectorAll('.platform-tab').forEach(t => t.classList.remove('active'));
                 document.querySelector('.platform-tab[data-platform="all"]').classList.add('active');
-                
+
                 videoManager.applyFiltersAndSearch();
                 videoManager.showNotification('All filters cleared', 'success');
             });
@@ -3455,20 +3533,20 @@
 
         async function init() {
             createFloatingParticles();
-            
+
             videoManager = new EnhancedVideoManager();
             videoPlayerController = new EnhancedVideoPlayer(videoManager);
-            
+
             setupEventListeners();
-            
+
             await videoManager.loadVideos();
-            
+
             // Load the first video if one exists and none is currently selected
             if (videoManager.filteredVideos.length > 0 && !videoManager.currentVideoId) {
                 const firstVideo = videoManager.filteredVideos[0];
                 videoPlayerController.loadVideo(firstVideo);
             }
-            
+
             videoManager.showNotification('Universal Video Player Initialized - All Platforms Supported!', 'success');
         }
 
@@ -3476,7 +3554,7 @@
         window.addEventListener('load', init);
 
         // Global functions for HTML onclick handlers
-        window.removeFilter = function(type) {
+        window.removeFilter = function (type) {
             if (type === 'search') {
                 document.getElementById('videoSearch').value = '';
                 videoManager.currentSearchTerm = '';
@@ -3488,12 +3566,12 @@
             videoManager.applyFiltersAndSearch();
         };
 
-        window.clearAllFiltersAndSearch = function() {
+        window.clearAllFiltersAndSearch = function () {
             document.getElementById('clearAllFilters').click();
         };
 
         // API Key Configuration
-        window.setAirtableApiKey = function(apiKey) {
+        window.setAirtableApiKey = function (apiKey) {
             if (apiKey && apiKey.startsWith('pat')) {
                 videoManager.services.airtable = new AirtableService(apiKey);
                 videoManager.searchService = new SearchService(videoManager.services.airtable);
